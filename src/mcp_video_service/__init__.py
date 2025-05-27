@@ -7,7 +7,7 @@ video_service = VideoService()
 @mcp.tool()
 async def video_download(url: str) -> str:
     """从支持的视频平台下载视频"""
-    return await video_service.download(url)
+    return await video_service.download_video(url)
 
 @mcp.tool()
 async def audio_download(url: str) -> str:
