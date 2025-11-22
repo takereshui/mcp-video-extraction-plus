@@ -1,174 +1,252 @@
-# MCP Video & Audio Text Extraction Server
+# MCP Video Extraction plus - 语音识别服务集成修改说明
 
-An MCP server that provides text extraction capabilities from various video platforms and audio files. This server implements the Model Context Protocol (MCP) to provide standardized access to audio transcription services.
+## 概述
 
-## Supported Platforms
+本次修改将项目的语音识别服务从仅支持 **Whisper（本地模型）** 扩展为支持三种方式：
 
-This service supports downloading videos and extracting audio from various platforms, including but not limited to:
+1. **Whisper** - OpenAI 的本地语音识别模型（原有）
+2. **JianYing (CapCut)** - 字节跳动简影/CapCut 的在线语音识别服务
+3. **Bcut (B站剪辑)** - 哔哩哔哩剪辑的在线语音识别服务
 
-- YouTube
-- Bilibili
-- TikTok
-- Instagram
-- Twitter/X
-- Facebook
-- Vimeo
-- Dailymotion
-- SoundCloud
+## 新增文件
 
-For a complete list of supported platforms, please visit [yt-dlp supported sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
+### 核心 ASR 模块
 
-## Core Technology
+| 文件                                             | 说明                                    |
+| ------------------------------------------------ | --------------------------------------- |
+| `src/mcp_video_service/services/asr_data.py`     | ASR 数据结构定义（ASRDataSeg、ASRData） |
+| `src/mcp_video_service/services/status.py`       | ASR 任务状态枚举                        |
+| `src/mcp_video_service/services/base_asr.py`     | 基础 ASR 抽象类，所有 ASR 实现的父类    |
+| `src/mcp_video_service/services/jianying_asr.py` | 简影（CapCut）语音识别实现              |
+| `src/mcp_video_service/services/bcut_asr.py`     | B站剪辑（Bcut）语音识别实现             |
+| `src/mcp_video_service/services/__init__.py`     | Services 包初始化文件                   |
 
-This project utilizes OpenAI's Whisper model for audio-to-text processing through MCP tools. The server exposes four main tools:
+## 修改的文件
 
-1. Video download: Download videos from supported platforms
-2. Audio download: Extract audio from videos on supported platforms
-3. Video text extraction: Extract text from videos (download and transcribe)
-4. Audio file text extraction: Extract text from audio files
+### 1. `src/mcp_video_service/services/video_service.py`
 
-### MCP Integration
+**主要改动：**
 
-This server is built using the Model Context Protocol, which provides:
-- Standardized way to expose tools to LLMs
-- Secure access to video content and audio files
-- Integration with MCP clients like Claude Desktop
+- 添加 ASR 提供者配置支持（`asr_provider`）
+- 修改 `__init__` 方法，支持从配置文件读取 ASR 提供者选择
+- 新增 `_create_asr_instance()` 方法，根据配置创建对应的 ASR 实例
+- 修改 `extract_text()` 方法，支持多种 ASR 提供者
+  - 如果选择 Whisper，使用本地模型
+  - 如果选择 JianYing 或 Bcut，调用在线 API
+- 添加导入语句，支持相对导入和绝对导入兼容
 
-## Features
+**配置参数：**
 
-- High-quality speech recognition based on Whisper
-- Multi-language text recognition
-- Support for various audio formats (mp3, wav, m4a, etc.)
-- MCP-compliant tools interface
-- Asynchronous processing for large files
-
-## Tech Stack
-
-- Python 3.10+
-- Model Context Protocol (MCP) Python SDK
-- yt-dlp (YouTube video download)
-- openai-whisper (Core audio-to-text engine)
-- pydantic
-
-## System Requirements
-
-- FFmpeg (Required for audio processing)
-- Minimum 8GB RAM
-- Recommended GPU acceleration (NVIDIA GPU + CUDA)
-- Sufficient disk space (for model download and temporary files)
-
-## Important First Run Notice
-
-**Important:** On first run, the system will automatically download the Whisper model file (approximately 1GB). This process may take several minutes to tens of minutes, depending on your network conditions. The model file will be cached locally and won't need to be downloaded again for subsequent runs.
-
-## Installation
-
-### Using uv (recommended)
-
-When using uv no specific installation is needed. We will use uvx to directly run the video extraction server:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-### Install FFmpeg
-
-FFmpeg is required for audio processing. You can install it through various methods:
-
-```bash
-# Ubuntu or Debian
-sudo apt update && sudo apt install ffmpeg
-
-# Arch Linux
-sudo pacman -S ffmpeg
-
-# MacOS
-brew install ffmpeg
-
-# Windows (using Chocolatey)
-choco install ffmpeg
-
-# Windows (using Scoop)
-scoop install ffmpeg
-```
-
-## Usage
-
-### Configure for Claude/Cursor
-
-Add to your Claude/Cursor settings:
-
-```json
-"mcpServers": {
-  "video-extraction": {
-    "command": "uvx",
-    "args": ["mcp-video-extraction"]
-  }
+```python
+self.config = {
+    'asr': {
+        'provider': 'whisper',  # 可选: whisper, jianying, bcut
+        'use_cache': False,
+        'need_word_time_stamp': False,
+    },
+    'jianying': {
+        'start_time': 0,
+        'end_time': 6000,
+    },
+    # ... 其他配置
 }
 ```
 
-### Available MCP Tools
+### 2. `config.yaml`
 
-1. Video download: Download videos from supported platforms
-2. Audio download: Extract audio from videos on supported platforms
-3. Video text extraction: Extract text from videos (download and transcribe)
-4. Audio file text extraction: Extract text from audio files
+**新增配置项：**
 
-## Configuration
+```yaml
+# ASR（自动语音识别）提供者配置
+asr:
+  provider: "whisper"  # 可选: whisper, jianying, bcut
+  use_cache: false
+  need_word_time_stamp: false
 
-The service can be configured through environment variables:
+# JianYing (CapCut) 语音识别配置
+jianying:
+  start_time: 0      # 音频开始时间（毫秒）
+  end_time: 6000     # 音频结束时间（毫秒）
 
-### Whisper Configuration
-- `WHISPER_MODEL`: Whisper model size (tiny/base/small/medium/large), default: 'base'
-- `WHISPER_LANGUAGE`: Language setting for transcription, default: 'auto'
+# Bcut (B站剪辑) 语音识别配置
+# 暂无特殊配置，使用默认值
+```
 
-### YouTube Download Configuration
-- `YOUTUBE_FORMAT`: Video format for download, default: 'bestaudio'
-- `AUDIO_FORMAT`: Audio format for extraction, default: 'mp3'
-- `AUDIO_QUALITY`: Audio quality setting, default: '192'
+## 使用方式
 
-### Storage Configuration
-- `TEMP_DIR`: Temporary file storage location, default: '/tmp/mcp-video'
+### 1. 使用 Whisper（本地模型，默认）
 
-### Download Settings
-- `DOWNLOAD_RETRIES`: Number of download retries, default: 10
-- `FRAGMENT_RETRIES`: Number of fragment download retries, default: 10
-- `SOCKET_TIMEOUT`: Socket timeout in seconds, default: 30
+```python
+from mcp_video_service.services.video_service import VideoService
 
-## Performance Optimization Tips
+service = VideoService(config_path='config.yaml')
+# config.yaml 中设置: asr.provider = "whisper"
 
-1. GPU Acceleration:
-   - Install CUDA and cuDNN
-   - Ensure GPU version of PyTorch is installed
+text = await service.extract_text('audio.mp3')
+```
 
-2. Model Size Adjustment:
-   - tiny: Fastest but lower accuracy
-   - base: Balanced speed and accuracy
-   - large: Highest accuracy but requires more resources
+### 2. 使用 JianYing（在线服务）
 
-3. Use SSD storage for temporary files to improve I/O performance
+```python
+# 修改 config.yaml
+# asr:
+#   provider: "jianying"
+#   use_cache: false
+#   need_word_time_stamp: false
+# jianying:
+#   start_time: 0
+#   end_time: 6000
 
-## Notes
+service = VideoService(config_path='config.yaml')
+text = await service.extract_text('audio.mp3')
+```
 
-- Whisper model (approximately 1GB) needs to be downloaded on first run
-- Ensure sufficient disk space for temporary audio files
-- Stable network connection required for YouTube video downloads
-- GPU recommended for faster audio processing
-- Processing long videos may take considerable time
+### 3. 使用 Bcut（在线服务）
 
-## MCP Integration Guide
+```python
+# 修改 config.yaml
+# asr:
+#   provider: "bcut"
+#   use_cache: true
+#   need_word_time_stamp: false
 
-This server can be used with any MCP-compatible client, such as:
-- Claude Desktop
-- Custom MCP clients
-- Other MCP-enabled applications
+service = VideoService(config_path='config.yaml')
+text = await service.extract_text('audio.mp3')
+```
 
-For more information about MCP, visit [Model Context Protocol](https://modelcontextprotocol.io/introduction).
+### 4. 通过环境变量配置
 
-## Documentation
+```bash
+# 使用 JianYing
+export ASR_PROVIDER=jianying
+export ASR_USE_CACHE=false
+export JIANYING_START_TIME=0
+export JIANYING_END_TIME=6000
 
-For Chinese version of this documentation, please refer to [README_zh.md](README_zh.md)
+# 使用 Bcut
+export ASR_PROVIDER=bcut
+export ASR_USE_CACHE=true
+```
 
-## License
+## 架构设计
 
-MIT
+### 类继承关系
+
+```
+BaseASR (抽象基类)
+├── JianYingASR
+├── BcutASR
+└── VideoService (使用 Whisper 时直接调用 whisper.load_model)
+```
+
+### BaseASR 的主要特性
+
+- **统一接口**：所有 ASR 实现都继承自 `BaseASR`
+- **缓存支持**：通过 CRC32 校验和生成缓存键
+- **速率限制**：内置速率限制机制，防止 API 过载
+- **进度回调**：支持异步进度回调函数
+- **错误处理**：统一的错误处理和日志记录
+
+## 数据结构
+
+### ASRDataSeg（分段数据）
+
+```python
+@dataclass
+class ASRDataSeg:
+    text: str          # 分段文本
+    start_time: float  # 开始时间（毫秒）
+    end_time: float    # 结束时间（毫秒）
+```
+
+### ASRData（完整数据）
+
+```python
+@dataclass
+class ASRData:
+    text: str                    # 完整文本
+    segments: List[ASRDataSeg]   # 分段列表
+```
+
+## 状态管理
+
+ASR 任务的状态通过 `ASRStatus` 枚举管理：
+
+| 状态            | 进度 | 说明       |
+| --------------- | ---- | ---------- |
+| UPLOADING       | 20   | 上传中     |
+| SUBMITTING      | 40   | 提交中     |
+| QUERYING_RESULT | 60   | 查询结果中 |
+| CREATING_TASK   | 40   | 创建任务中 |
+| TRANSCRIBING    | 60   | 转录中     |
+| COMPLETED       | 100  | 已完成     |
+
+## 导入兼容性
+
+所有新增的 ASR 模块都支持**相对导入**和**绝对导入**的双重兼容：
+
+```python
+# 相对导入（在包内使用）
+from .asr_data import ASRDataSeg
+from .base_asr import BaseASR
+
+# 绝对导入（直接加载模块时使用）
+from asr_data import ASRDataSeg
+from base_asr import BaseASR
+```
+
+这确保了模块在不同的导入场景下都能正常工作。
+
+## 依赖项
+
+### 新增依赖
+
+- `requests` - 用于 HTTP 请求（JianYing 和 Bcut API）
+
+### 现有依赖
+
+- `yt-dlp` - 视频下载
+- `whisper` - 本地语音识别（仅在使用 Whisper 时需要）
+- `pyyaml` - 配置文件解析
+
+## 环境变量支持
+
+| 环境变量              | 说明                  | 默认值  |
+| --------------------- | --------------------- | ------- |
+| `ASR_PROVIDER`        | ASR 提供者            | whisper |
+| `ASR_USE_CACHE`       | 是否使用缓存          | false   |
+| `ASR_WORD_TIME_STAMP` | 是否需要词级时间戳    | false   |
+| `JIANYING_START_TIME` | JianYing 音频开始时间 | 0       |
+| `JIANYING_END_TIME`   | JianYing 音频结束时间 | 6000    |
+| `WHISPER_MODEL`       | Whisper 模型大小      | base    |
+| `WHISPER_LANGUAGE`    | Whisper 语言          | auto    |
+
+## 向后兼容性
+
+本次修改完全向后兼容：
+
+- 默认 ASR 提供者为 `whisper`，保持原有行为
+- 原有的 `extract_text()` 接口保持不变
+- 所有新增功能都是可选的
+
+## 测试验证
+
+所有新增模块已通过以下验证：
+
+- ✓ Python 语法检查
+- ✓ 模块导入测试
+- ✓ 类继承关系验证
+- ✓ 配置文件解析测试
+
+## 后续扩展
+
+该架构支持轻松添加新的 ASR 提供者：
+
+1. 创建新类继承 `BaseASR`
+2. 实现 `_run()` 和 `_make_segments()` 方法
+3. 在 `VideoService._create_asr_instance()` 中添加条件分支
+4. 在 `config.yaml` 中添加相应配置项
+
+## 许可证
+
+保持原项目许可证不变。
