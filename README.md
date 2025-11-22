@@ -8,6 +8,14 @@
 2. **JianYing (CapCut)** - 字节跳动简影/CapCut 的在线语音识别服务
 3. **Bcut (B站剪辑)** - 哔哩哔哩剪辑的在线语音识别服务
 
+## Overview
+
+This update expands the project's speech recognition service from supporting only **Whisper (local model)** to supporting three methods:
+
+1. **Whisper** – OpenAI's local speech recognition model (original)
+2. **JianYing (CapCut)** – ByteDance's JianYing/CapCut online speech recognition service
+3. **Bcut (Bilibili Cut)** – Bilibili's online speech recognition service
+   
 ## 新增文件
 
 ### 核心 ASR 模块
