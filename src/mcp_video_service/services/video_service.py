@@ -1,11 +1,19 @@
 import os
 import tempfile
-import whisper
 import yt_dlp
 import logging
 import uuid
-from typing import Optional
+from typing import Optional, Literal
 import yaml
+
+try:
+    from .base_asr import BaseASR
+    from .jianying_asr import JianYingASR
+    from .bcut_asr import BcutASR
+except ImportError:
+    from base_asr import BaseASR
+    from jianying_asr import JianYingASR
+    from bcut_asr import BcutASR
 
 # 配置日志
 logging.basicConfig(
@@ -81,9 +89,18 @@ class VideoService:
             
         # 从环境变量读取配置，如果没有则从文件配置读取，最后使用默认值        
         self.config = {
+            'asr': {
+                'provider': os.getenv('ASR_PROVIDER') or get_config_value(['asr', 'provider'], 'whisper'),
+                'use_cache': os.getenv('ASR_USE_CACHE', 'false').lower() == 'true' or get_config_value(['asr', 'use_cache'], False),
+                'need_word_time_stamp': os.getenv('ASR_WORD_TIME_STAMP', 'false').lower() == 'true' or get_config_value(['asr', 'need_word_time_stamp'], False),
+            },
             'whisper': {
                 'model': os.getenv('WHISPER_MODEL') or get_config_value(['whisper', 'model'], 'base'),
                 'language': os.getenv('WHISPER_LANGUAGE') or get_config_value(['whisper', 'language'], 'auto')
+            },
+            'jianying': {
+                'start_time': float(os.getenv('JIANYING_START_TIME', '0') or get_config_value(['jianying', 'start_time'], 0)),
+                'end_time': float(os.getenv('JIANYING_END_TIME', '6000') or get_config_value(['jianying', 'end_time'], 6000)),
             },
             'youtube': {
                 'download': {
@@ -96,9 +113,17 @@ class VideoService:
                 'temp_dir': os.getenv('TEMP_DIR') or get_config_value(['storage', 'temp_dir'], '/tmp/mcp-video')
             }
         }
-            
-        logger.info("初始化 Whisper 模型...")
-        self.model = whisper.load_model(self.config['whisper']['model'])
+        
+        # 初始化 ASR 提供者
+        self.asr_provider = self.config['asr']['provider'].lower()
+        
+        # 如果使用 Whisper，则加载模型
+        if self.asr_provider == 'whisper':
+            import whisper
+            logger.info("初始化 Whisper 模型...")
+            self.whisper_model = whisper.load_model(self.config['whisper']['model'])
+        else:
+            self.whisper_model = None
         
         # 通用下载选项
         self.common_opts = {
@@ -269,6 +294,38 @@ class VideoService:
             Exception: 当下载失败时抛出异常
         """
         return await self.download(url, self.audio_opts)
+    
+    def _create_asr_instance(self, audio_path: str) -> BaseASR:
+        """创建 ASR 实例
+        
+        Args:
+            audio_path: 音频文件路径
+            
+        Returns:
+            BaseASR: ASR 实例
+            
+        Raises:
+            ValueError: 当 ASR 提供者不支持时
+        """
+        if self.asr_provider == 'whisper':
+            # Whisper 本地模型不需要创建实例，直接使用
+            return None
+        elif self.asr_provider == 'jianying':
+            return JianYingASR(
+                audio_path,
+                use_cache=self.config['asr']['use_cache'],
+                need_word_time_stamp=self.config['asr']['need_word_time_stamp'],
+                start_time=self.config['jianying']['start_time'],
+                end_time=self.config['jianying']['end_time'],
+            )
+        elif self.asr_provider == 'bcut':
+            return BcutASR(
+                audio_path,
+                use_cache=self.config['asr']['use_cache'],
+                need_word_time_stamp=self.config['asr']['need_word_time_stamp'],
+            )
+        else:
+            raise ValueError(f"不支持的 ASR 提供者: {self.asr_provider}")
                    
     async def extract_text(self, audio_path: str) -> str:
         """
@@ -287,12 +344,20 @@ class VideoService:
             if not os.path.exists(audio_path):
                 raise Exception(f"音频文件不存在: {audio_path}")
 
-            # 使用 Whisper 模型转录音频
-            result = self.model.transcribe(
-                audio_path,
-                language=None if self.config['whisper']['language'] == 'auto' else self.config['whisper']['language']
-            )
-            return result["text"]
+            if self.asr_provider == 'whisper':
+                # 使用 Whisper 本地模型
+                logger.info(f"使用 Whisper 模型进行语音识别: {audio_path}")
+                result = self.whisper_model.transcribe(
+                    audio_path,
+                    language=None if self.config['whisper']['language'] == 'auto' else self.config['whisper']['language']
+                )
+                return result["text"]
+            else:
+                # 使用在线 ASR 服务
+                logger.info(f"使用 {self.asr_provider} 进行语音识别: {audio_path}")
+                asr_instance = self._create_asr_instance(audio_path)
+                asr_data = asr_instance.run()
+                return asr_data.text
 
         except Exception as e:
             raise Exception(f"文字提取失败: {str(e)}")
@@ -335,7 +400,3 @@ class VideoService:
 
         except Exception as e:
             raise Exception(f"视频处理失败: {str(e)}")
-
-    def _generate_unique_filename(self, file_ext: str) -> str:
-        """生成唯一的文件名"""
-        return f"{uuid.uuid4()}.{file_ext}" 

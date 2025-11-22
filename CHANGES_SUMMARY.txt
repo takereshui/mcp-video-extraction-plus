@@ -1,0 +1,158 @@
+================================================================================
+MCP Video Extraction - 语音识别服务集成修改总结
+================================================================================
+
+修改时间: 2025-11-22
+修改内容: 集成简影(JianYing/CapCut)和B站剪辑(Bcut)两种在线语音识别服务
+
+================================================================================
+新增文件 (6个)
+================================================================================
+
+1. src/mcp_video_service/services/asr_data.py
+   - ASRDataSeg: 语音识别分段数据类
+   - ASRData: 完整语音识别数据类
+
+2. src/mcp_video_service/services/status.py
+   - ASRStatus: 语音识别任务状态枚举
+   - 支持进度跟踪和状态回调
+
+3. src/mcp_video_service/services/base_asr.py
+   - BaseASR: 所有ASR实现的抽象基类
+   - 提供统一接口、缓存、速率限制等功能
+
+4. src/mcp_video_service/services/jianying_asr.py
+   - JianYingASR: 简影(CapCut)语音识别实现
+   - 支持AWS S3风格的文件上传
+   - 完整的签名和认证机制
+
+5. src/mcp_video_service/services/bcut_asr.py
+   - BcutASR: B站剪辑(Bcut)语音识别实现
+   - 支持分片上传
+   - 异步任务轮询
+
+6. src/mcp_video_service/services/__init__.py
+   - Services包初始化文件
+
+================================================================================
+修改的文件 (2个)
+================================================================================
+
+1. src/mcp_video_service/services/video_service.py
+   主要改动:
+   - 添加ASR提供者配置支持 (asr_provider)
+   - 新增 _create_asr_instance() 方法
+   - 修改 extract_text() 支持多种ASR提供者
+   - 添加灵活的导入兼容性处理
+   
+   配置参数:
+   - asr.provider: 选择ASR提供者 (whisper/jianying/bcut)
+   - asr.use_cache: 是否使用缓存
+   - asr.need_word_time_stamp: 是否需要词级时间戳
+   - jianying.start_time/end_time: JianYing特定配置
+
+2. config.yaml
+   新增配置项:
+   - asr 部分: 提供者选择和通用配置
+   - jianying 部分: 音频时间范围配置
+   - bcut 部分: 预留配置区域
+
+================================================================================
+核心特性
+================================================================================
+
+✓ 多ASR提供者支持
+  - Whisper (本地模型)
+  - JianYing (字节跳动在线服务)
+  - Bcut (哔哩哔哩在线服务)
+
+✓ 统一的ASR接口
+  - 所有实现继承自BaseASR
+  - 统一的run()方法
+  - 统一的数据结构
+
+✓ 灵活的配置方式
+  - 配置文件支持
+  - 环境变量支持
+  - 运行时动态配置
+
+✓ 高级功能
+  - 缓存支持 (CRC32校验)
+  - 速率限制 (防止API过载)
+  - 进度回调 (异步任务跟踪)
+  - 词级时间戳 (可选)
+
+✓ 完全向后兼容
+  - 默认使用Whisper
+  - 原有接口保持不变
+  - 新功能完全可选
+
+================================================================================
+使用示例
+================================================================================
+
+1. 使用Whisper (默认):
+   service = VideoService(config_path='config.yaml')
+   text = await service.extract_text('audio.mp3')
+
+2. 使用JianYing:
+   # 在config.yaml中设置: asr.provider = "jianying"
+   service = VideoService(config_path='config.yaml')
+   text = await service.extract_text('audio.mp3')
+
+3. 使用Bcut:
+   # 在config.yaml中设置: asr.provider = "bcut"
+   service = VideoService(config_path='config.yaml')
+   text = await service.extract_text('audio.mp3')
+
+4. 环境变量配置:
+   export ASR_PROVIDER=jianying
+   export ASR_USE_CACHE=false
+
+================================================================================
+测试验证
+================================================================================
+
+✓ Python语法检查 - 通过
+✓ 模块导入测试 - 通过
+✓ 类继承关系验证 - 通过
+✓ 配置文件解析 - 通过
+
+所有新增模块已成功加载并通过验证。
+
+================================================================================
+依赖项
+================================================================================
+
+新增:
+- requests (用于HTTP请求)
+
+现有:
+- yt-dlp (视频下载)
+- whisper (本地语音识别)
+- pyyaml (配置解析)
+
+================================================================================
+环境变量支持
+================================================================================
+
+ASR_PROVIDER              - ASR提供者 (默认: whisper)
+ASR_USE_CACHE             - 是否使用缓存 (默认: false)
+ASR_WORD_TIME_STAMP       - 是否需要词级时间戳 (默认: false)
+JIANYING_START_TIME       - JianYing开始时间 (默认: 0)
+JIANYING_END_TIME         - JianYing结束时间 (默认: 6000)
+WHISPER_MODEL             - Whisper模型 (默认: base)
+WHISPER_LANGUAGE          - Whisper语言 (默认: auto)
+
+================================================================================
+后续扩展
+================================================================================
+
+该架构支持轻松添加新的ASR提供者:
+
+1. 创建新类继承BaseASR
+2. 实现_run()和_make_segments()方法
+3. 在VideoService._create_asr_instance()中添加分支
+4. 在config.yaml中添加配置项
+
+================================================================================

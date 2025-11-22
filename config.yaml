@@ -1,9 +1,24 @@
 # MCP Video Service 配置文件
 
-# Whisper 语音识别配置
+# ASR（自动语音识别）提供者配置
+# 支持的提供者: whisper, jianying, bcut
+asr:
+  provider: "jianying"  # 可选: whisper (本地), jianying (简影/CapCut), bcut (B站剪辑)
+  use_cache: false     # 是否使用缓存
+  need_word_time_stamp: false  # 是否需要词级时间戳
+
+# Whisper 语音识别配置（本地模型）
 whisper:
   model: "base"  # 可选: tiny, base, small, medium, large
   language: "auto"  # 可选: auto, zh, en, ja, ko 等
+
+# JianYing (CapCut) 语音识别配置（在线服务）
+jianying:
+  start_time: 0      # 音频开始时间（毫秒）
+  end_time: 6000     # 音频结束时间（毫秒）
+
+# Bcut (B站剪辑) 语音识别配置（在线服务）
+# 暂无特殊配置，使用默认值
 
 # YouTube/视频下载配置
 youtube:
